@@ -1,1 +1,1 @@
-{"statusCode": 200, "body": {"message": "Scan completed", "scan_id": "4a98e4c3-0d9a-4659-b916-445d5f8ded23", "resources_scanned": 9, "new_findings": 2, "known_findings": 2, "resolved": 0, "has_critical_or_high": true, "duration_seconds": 6.56}}
+{"statusCode": 200, "body": {"message": "Scan completed", "scan_id": "ecf76b52-8ae5-4969-9cec-2c584c0140f8", "resources_scanned": 9, "new_findings": 2, "known_findings": 2, "resolved": 0, "has_critical_or_high": true, "duration_seconds": 6.4}}

@@ -45,6 +45,7 @@ resource "aws_lambda_function" "scanner" {
       SNS_TOPIC_ARN     = local.sns_topic_arn
       SCAN_REGIONS      = join(",", var.scan_regions)
       SLACK_WEBHOOK_URL = var.slack_webhook_url
+      SLACK_BOT_TOKEN   = var.slack_bot_token
     }
   }
 
@@ -100,6 +101,7 @@ resource "aws_lambda_function" "remediation" {
   environment {
     variables = {
       SLACK_SIGNING_SECRET = var.slack_signing_secret
+      SLACK_BOT_TOKEN      = var.slack_bot_token
     }
   }
 
@@ -131,4 +133,12 @@ resource "aws_cloudwatch_log_group" "remediation" {
 resource "aws_lambda_function_url" "remediation" {
   function_name      = aws_lambda_function.remediation.function_name
   authorization_type = "NONE"
+}
+
+resource "aws_lambda_permission" "allow_public_invoke" {
+  statement_id           = "FunctionURLAllowPublicAccess"
+  action                 = "lambda:InvokeFunctionUrl"
+  function_name          = aws_lambda_function.remediation.function_name
+  principal              = "*"
+  function_url_auth_type = "NONE"
 }

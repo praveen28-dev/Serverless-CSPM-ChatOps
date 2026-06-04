@@ -60,6 +60,13 @@ variable "slack_signing_secret" {
   sensitive   = true
 }
 
+variable "slack_bot_token" {
+  description = "Slack Bot User OAuth Token (xoxb-...)"
+  type        = string
+  default     = ""
+  sensitive   = true
+}
+
 # -----------------------------------------------------------------
 # DynamoDB
 # -----------------------------------------------------------------
