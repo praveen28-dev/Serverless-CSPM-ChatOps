@@ -28,7 +28,7 @@ from datetime import datetime, timezone
 import boto3
 
 from src.scanner.models import Finding, ScanResult, Severity
-from src.scanner.notifier import ConsoleNotifier
+from src.scanner.notifier import ConsoleNotifier, SlackNotifier, SNSNotifier
 from src.scanner.scanner import RDSScanner, S3Scanner, SecurityGroupScanner
 from src.scanner.state_manager import StateManager
 
@@ -120,6 +120,18 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         type=str,
         default="ap-south-1",
         help="AWS region where the DynamoDB table is located (default: ap-south-1)",
+    )
+    parser.add_argument(
+        "--slack-webhook",
+        type=str,
+        default=None,
+        help="Slack Incoming Webhook URL to send alerts to",
+    )
+    parser.add_argument(
+        "--sns-topic-arn",
+        type=str,
+        default=None,
+        help="AWS SNS Topic ARN to publish findings to",
     )
     return parser.parse_args(argv)
 
@@ -367,8 +379,18 @@ def main(argv: list[str] | None = None) -> int:
         }
         print(json.dumps(output, indent=2, default=str))
     else:
-        notifier = ConsoleNotifier()
-        notifier.notify(new_findings)
+        # We always output to the console
+        notifiers = [ConsoleNotifier()]
+
+        if args.slack_webhook:
+            notifiers.append(SlackNotifier(webhook_url=args.slack_webhook))
+
+        if args.sns_topic_arn:
+            sns_client = session.client("sns", region_name=args.dynamodb_region)
+            notifiers.append(SNSNotifier(sns_client=sns_client, topic_arn=args.sns_topic_arn))
+
+        for notifier in notifiers:
+            notifier.notify(new_findings)
 
     elapsed = time.monotonic() - start
 

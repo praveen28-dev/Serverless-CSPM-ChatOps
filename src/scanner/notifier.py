@@ -1,14 +1,18 @@
 """Notification backends for CSPM scanner findings.
 
-Phase 1 provides a fully functional ``ConsoleNotifier`` with coloured terminal
-output.  ``SlackNotifier`` and ``SNSNotifier`` are placeholders that will be
-wired up in later phases.
+Provides three backends:
+
+- ``ConsoleNotifier`` — pretty terminal output with ANSI colours.
+- ``SlackNotifier``   — posts Block Kit messages via Slack Incoming Webhook.
+- ``SNSNotifier``     — publishes JSON payloads to an AWS SNS topic.
 """
 
 from __future__ import annotations
 
 import json
 import logging
+import urllib.request
+import urllib.error
 from abc import ABC, abstractmethod
 from typing import Any
 
@@ -56,6 +60,13 @@ _SEVERITY_STYLE: dict[Severity, tuple[str, str]] = {
         f"{_Colours.DIM}{_Colours.CYAN}",
         "🔵",
     ),
+}
+
+_SEVERITY_EMOJI: dict[Severity, str] = {
+    Severity.CRITICAL: "🔴",
+    Severity.HIGH: "🟠",
+    Severity.MEDIUM: "🟡",
+    Severity.LOW: "🔵",
 }
 
 
@@ -138,22 +149,24 @@ class ConsoleNotifier(BaseNotifier):
         )
 
 
-# ── Slack notifier (Phase 3 placeholder) ────────────────────────────────────
+# ── Slack notifier ──────────────────────────────────────────────────────────
 
 class SlackNotifier(BaseNotifier):
-    """Posts findings to a Slack channel using Block Kit formatting.
+    """Posts findings to a Slack channel via Incoming Webhook (Block Kit).
 
-    .. note::
-        Slack integration will be enabled in **Phase 3**.  For now this
-        notifier only logs a message and prepares the Block Kit payload.
+    Uses Python's built-in ``urllib`` — no extra dependencies required.
     """
 
-    def __init__(self, webhook_url: str | None = None, channel: str = "#security-alerts") -> None:
+    def __init__(
+        self,
+        webhook_url: str,
+        channel: str = "#aws-security-alerts",
+    ) -> None:
         """Initialise the Slack notifier.
 
         Args:
-            webhook_url: Slack Incoming Webhook URL (not used yet).
-            channel: Target Slack channel name.
+            webhook_url: Slack Incoming Webhook URL.
+            channel: Target Slack channel name (for display/logging only).
         """
         self.webhook_url = webhook_url
         self.channel = channel
@@ -167,46 +180,53 @@ class SlackNotifier(BaseNotifier):
         Returns:
             A list of Block Kit block dicts.
         """
-        severity_emoji = {
-            Severity.CRITICAL: "🔴",
-            Severity.HIGH: "🟠",
-            Severity.MEDIUM: "🟡",
-            Severity.LOW: "🔵",
-        }
+        crit_count = sum(1 for f in findings if f.severity == Severity.CRITICAL)
+        high_count = sum(1 for f in findings if f.severity == Severity.HIGH)
+
+        # Header
+        header_text = (
+            f"🚨 CSPM ALERT — {len(findings)} new finding(s) detected"
+        )
+        if crit_count:
+            header_text += f" | {crit_count} CRITICAL"
+        if high_count:
+            header_text += f" | {high_count} HIGH"
 
         blocks: list[dict[str, Any]] = [
             {
                 "type": "header",
                 "text": {
                     "type": "plain_text",
-                    "text": f"🛡️ CSPM Scanner — {len(findings)} finding(s)",
+                    "text": header_text,
                     "emoji": True,
                 },
             },
             {"type": "divider"},
         ]
 
-        for finding in findings:
-            emoji = severity_emoji.get(finding.severity, "⚪")
+        # Individual findings (limit to 10 to stay within Slack block limits)
+        display_findings = findings[:10]
+        for finding in display_findings:
+            emoji = _SEVERITY_EMOJI.get(finding.severity, "⚪")
             blocks.append(
                 {
                     "type": "section",
                     "fields": [
                         {
                             "type": "mrkdwn",
-                            "text": f"*Severity:* {emoji} {finding.severity.value}",
+                            "text": f"*Severity:*\n{emoji} {finding.severity.value}",
                         },
                         {
                             "type": "mrkdwn",
-                            "text": f"*Region:* `{finding.region}`",
+                            "text": f"*Resource Type:*\n{finding.resource_type}",
                         },
                         {
                             "type": "mrkdwn",
-                            "text": f"*Resource:* `{finding.resource_name}`",
+                            "text": f"*Resource Name:*\n`{finding.resource_name}`",
                         },
                         {
                             "type": "mrkdwn",
-                            "text": f"*Type:* {finding.resource_type}",
+                            "text": f"*Region:*\n`{finding.region}`",
                         },
                     ],
                 }
@@ -216,51 +236,116 @@ class SlackNotifier(BaseNotifier):
                     "type": "section",
                     "text": {
                         "type": "mrkdwn",
-                        "text": f"⚠️ *{finding.issue}*",
+                        "text": (
+                            f"⚠️ *Issue:* {finding.issue}\n"
+                            f"🆔 *ID:* `{finding.resource_id}`"
+                        ),
                     },
                 }
             )
             blocks.append({"type": "divider"})
 
+        # Overflow notice
+        if len(findings) > 10:
+            blocks.append(
+                {
+                    "type": "section",
+                    "text": {
+                        "type": "mrkdwn",
+                        "text": (
+                            f"_… and {len(findings) - 10} more finding(s). "
+                            f"Check the full scan logs for details._"
+                        ),
+                    },
+                }
+            )
+
+        # Footer with action hint
+        blocks.append(
+            {
+                "type": "context",
+                "elements": [
+                    {
+                        "type": "mrkdwn",
+                        "text": (
+                            "🛡️ *CSPM Scanner* | "
+                            "Action Required: Investigate or execute SSM remediation document."
+                        ),
+                    },
+                ],
+            }
+        )
+
         return blocks
 
     def notify(self, findings: list[Finding]) -> None:
-        """Log the prepared payload.  Actual delivery deferred to Phase 3.
+        """Post findings to Slack via the Incoming Webhook.
 
         Args:
-            findings: Findings to (eventually) send to Slack.
+            findings: Findings to send to Slack.
         """
         if not findings:
+            logger.debug("SlackNotifier: no findings to send.")
             return
+
         blocks = self._build_blocks(findings)
-        logger.info(
-            "Slack integration will be enabled in Phase 3. "
-            "Prepared %d Block Kit blocks for channel %s.",
-            len(blocks),
-            self.channel,
+        payload = json.dumps({"blocks": blocks}).encode("utf-8")
+
+        req = urllib.request.Request(
+            self.webhook_url,
+            data=payload,
+            headers={"Content-Type": "application/json"},
+            method="POST",
         )
-        logger.debug("Slack payload: %s", json.dumps(blocks, indent=2))
+
+        try:
+            with urllib.request.urlopen(req, timeout=10) as resp:
+                status = resp.status
+                logger.info(
+                    "SlackNotifier: posted %d finding(s) to %s (HTTP %d)",
+                    len(findings),
+                    self.channel,
+                    status,
+                )
+                print(
+                    f"  💬  Slack alert sent to {self.channel} "
+                    f"({len(findings)} finding(s))"
+                )
+        except urllib.error.HTTPError as exc:
+            body = exc.read().decode("utf-8", errors="replace")
+            logger.error(
+                "SlackNotifier: HTTP %d error — %s", exc.code, body
+            )
+            print(f"  ❌  Slack alert FAILED (HTTP {exc.code}): {body}")
+        except urllib.error.URLError as exc:
+            logger.error("SlackNotifier: URL error — %s", exc.reason)
+            print(f"  ❌  Slack alert FAILED: {exc.reason}")
+        except Exception as exc:
+            logger.error("SlackNotifier: unexpected error — %s", exc)
+            print(f"  ❌  Slack alert FAILED: {exc}")
 
 
-# ── SNS notifier (Phase 3 placeholder) ──────────────────────────────────────
+# ── SNS notifier ────────────────────────────────────────────────────────────
 
 class SNSNotifier(BaseNotifier):
     """Publishes findings to an AWS SNS topic.
 
-    .. note::
-        SNS integration will be enabled in **Phase 3**.
+    Other services (email, PagerDuty, additional Lambda functions) can
+    subscribe to the topic independently.
     """
 
-    def __init__(self, topic_arn: str | None = None) -> None:
+    def __init__(self, sns_client: Any, topic_arn: str) -> None:
         """Initialise the SNS notifier.
 
         Args:
-            topic_arn: The ARN of the target SNS topic (not used yet).
+            sns_client: A ``boto3.client('sns')`` instance.
+            topic_arn: The ARN of the target SNS topic.
         """
+        self._client = sns_client
         self.topic_arn = topic_arn
 
     def _build_message(self, findings: list[Finding]) -> dict[str, Any]:
-        """Build an SNS message payload.
+        """Build a structured SNS message payload.
 
         Args:
             findings: Findings to include.
@@ -270,23 +355,56 @@ class SNSNotifier(BaseNotifier):
         """
         return {
             "source": "cspm-scanner",
+            "detail_type": "CSPM Scan Findings",
             "findings_count": len(findings),
+            "critical_count": sum(
+                1 for f in findings if f.severity == Severity.CRITICAL
+            ),
+            "high_count": sum(
+                1 for f in findings if f.severity == Severity.HIGH
+            ),
             "findings": [f.to_dict() for f in findings],
         }
 
     def notify(self, findings: list[Finding]) -> None:
-        """Log the prepared payload.  Actual delivery deferred to Phase 3.
+        """Publish findings to the configured SNS topic.
 
         Args:
-            findings: Findings to (eventually) publish to SNS.
+            findings: Findings to publish.
         """
         if not findings:
+            logger.debug("SNSNotifier: no findings to publish.")
             return
+
         message = self._build_message(findings)
-        logger.info(
-            "SNS integration will be enabled in Phase 3. "
-            "Prepared message with %d finding(s) for topic %s.",
-            len(findings),
-            self.topic_arn or "<not configured>",
+        subject = (
+            f"CSPM Alert: {len(findings)} new finding(s) detected"
         )
-        logger.debug("SNS payload: %s", json.dumps(message, indent=2))
+        # SNS subject max 100 chars
+        subject = subject[:100]
+
+        try:
+            resp = self._client.publish(
+                TopicArn=self.topic_arn,
+                Subject=subject,
+                Message=json.dumps(message, indent=2, default=str),
+            )
+            msg_id = resp.get("MessageId", "unknown")
+            logger.info(
+                "SNSNotifier: published %d finding(s) to %s (MessageId: %s)",
+                len(findings),
+                self.topic_arn,
+                msg_id,
+            )
+            print(
+                f"  📣  SNS alert published to topic "
+                f"({len(findings)} finding(s), MessageId: {msg_id})"
+            )
+        except Exception as exc:
+            logger.error(
+                "SNSNotifier: failed to publish to %s — %s",
+                self.topic_arn,
+                exc,
+            )
+            print(f"  ❌  SNS publish FAILED: {exc}")
+
