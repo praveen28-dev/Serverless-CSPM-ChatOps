@@ -217,6 +217,14 @@ resource "aws_iam_role_policy" "remediation_actions" {
           "ec2:DescribeSecurityGroups"
         ]
         Resource = "*"
+      },
+      {
+        Sid    = "LambdaSelfInvoke"
+        Effect = "Allow"
+        Action = [
+          "lambda:InvokeFunction"
+        ]
+        Resource = "arn:aws:lambda:${data.aws_region.current.name}:${data.aws_caller_identity.current.account_id}:function:${local.name_prefix}-remediation"
       }
     ]
   })

@@ -54,6 +54,37 @@ def send_slack_response(response_url: str, text: str) -> None:
 
 def lambda_handler(event: dict[str, Any], context: Any) -> dict[str, Any]:
     """Lambda entry point for handling Slack interactivity."""
+    
+    # --- ASYNC EXECUTION BLOCK ---
+    if event.get("async_action") == "remediate":
+        import boto3
+        payload = event.get("payload", {})
+        response_url = payload.get("response_url")
+        user = payload.get("user", {}).get("username", "Someone")
+        
+        for action in payload.get("actions", []):
+            action_value_str = action.get("value")
+            if not action_value_str: continue
+            
+            try:
+                action_value = json.loads(action_value_str)
+            except json.JSONDecodeError:
+                continue
+
+            action_type = action_value.get("action")
+            resource_type = action_value.get("type")
+            resource_id = action_value.get("id")
+            region = action_value.get("region")
+
+            if action_type == "remediate" and resource_type == "EC2::SecurityGroup":
+                logger.info(f"Remediating Security Group {resource_id} in {region}")
+                result_msg = remediate_security_group(resource_id, region)
+                
+                if response_url:
+                    send_slack_response(response_url, f"🛠️ *Remediation by @{user}:* {result_msg}")
+        return {"statusCode": 200}
+    # -----------------------------
+
     signing_secret = os.environ.get("SLACK_SIGNING_SECRET")
     if not signing_secret:
         logger.error("SLACK_SIGNING_SECRET is not configured.")
@@ -62,7 +93,6 @@ def lambda_handler(event: dict[str, Any], context: Any) -> dict[str, Any]:
     headers = event.get("headers", {})
     body = event.get("body", "")
 
-    # API Gateway might base64 encode the body depending on configuration
     if event.get("isBase64Encoded"):
         import base64
         body = base64.b64decode(body).decode("utf-8")
@@ -70,7 +100,6 @@ def lambda_handler(event: dict[str, Any], context: Any) -> dict[str, Any]:
     if not verify_slack_signature(headers, body, signing_secret):
         return {"statusCode": 401, "body": "Invalid signature"}
 
-    # The body is x-www-form-urlencoded
     parsed_body = urllib.parse.parse_qs(body)
     if "payload" not in parsed_body:
         return {"statusCode": 400, "body": "Missing payload"}
@@ -81,35 +110,21 @@ def lambda_handler(event: dict[str, Any], context: Any) -> dict[str, Any]:
     except json.JSONDecodeError:
         return {"statusCode": 400, "body": "Invalid payload JSON"}
 
-    # We only care about block_actions
     if payload.get("type") != "block_actions":
         return {"statusCode": 200, "body": ""}
 
-    response_url = payload.get("response_url")
-    user = payload.get("user", {}).get("username", "Someone")
+    # Immediately invoke this exact same Lambda asynchronously to avoid the 3.0s Slack timeout!
+    import boto3
+    try:
+        lambda_client = boto3.client('lambda', region_name=os.environ.get("AWS_REGION", "ap-south-1"))
+        lambda_client.invoke(
+            FunctionName=context.function_name,
+            InvocationType='Event', # Asynchronous
+            Payload=json.dumps({"async_action": "remediate", "payload": payload})
+        )
+    except Exception as e:
+        logger.error(f"Failed to invoke self asynchronously: {e}")
 
-    for action in payload.get("actions", []):
-        action_value_str = action.get("value")
-        if not action_value_str:
-            continue
-
-        try:
-            action_value = json.loads(action_value_str)
-        except json.JSONDecodeError:
-            continue
-
-        action_type = action_value.get("action")
-        resource_type = action_value.get("type")
-        resource_id = action_value.get("id")
-        region = action_value.get("region")
-
-        if action_type == "remediate" and resource_type == "EC2::SecurityGroup":
-            logger.info(f"Remediating Security Group {resource_id} in {region}")
-            result_msg = remediate_security_group(resource_id, region)
-            
-            # Send the result back to Slack
-            if response_url:
-                send_slack_response(response_url, f"🛠️ *Remediation by @{user}:* {result_msg}")
-
-    # Return empty 200 OK so Slack knows we received it
+    # Return empty 200 OK immediately so Slack knows we received it within 3 seconds
     return {"statusCode": 200, "body": ""}
+
