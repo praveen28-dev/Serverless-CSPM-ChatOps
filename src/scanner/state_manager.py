@@ -123,7 +123,7 @@ class StateManager:
     def _dynamo_is_known(self, resource_id: str) -> bool:
         """Check DynamoDB for an open finding."""
         try:
-            resp = self._table.get_item(Key={"resource_id": resource_id})
+            resp = self._table.get_item(Key={"ResourceID": resource_id})
             item = resp.get("Item")
             return item is not None and item.get("status") == "open"
         except (ClientError, BotoCoreError) as exc:
@@ -137,9 +137,10 @@ class StateManager:
     def _dynamo_record(self, finding: Finding) -> None:
         """Write a finding to DynamoDB."""
         try:
+            now = datetime.now(timezone.utc)
             self._table.put_item(
                 Item={
-                    "resource_id": finding.resource_id,
+                    "ResourceID": finding.resource_id,
                     "resource_type": finding.resource_type,
                     "resource_name": finding.resource_name,
                     "region": finding.region,
@@ -147,8 +148,9 @@ class StateManager:
                     "issue": finding.issue,
                     "details": json.dumps(finding.details),
                     "detected_at": finding.detected_at,
+                    "last_seen": now.isoformat(),
                     "status": "open",
-                    "updated_at": datetime.now(timezone.utc).isoformat(),
+                    "updated_at": now.isoformat(),
                 }
             )
             logger.debug(
@@ -166,7 +168,7 @@ class StateManager:
         """Mark a finding as resolved in DynamoDB."""
         try:
             self._table.update_item(
-                Key={"resource_id": resource_id},
+                Key={"ResourceID": resource_id},
                 UpdateExpression=(
                     "SET #s = :resolved, resolved_at = :now"
                 ),
@@ -207,6 +209,11 @@ class StateManager:
                     ExclusiveStartKey=resp["LastEvaluatedKey"],
                 )
                 items.extend(resp.get("Items", []))
+
+            # Normalize key name for compatibility with deduplication logic
+            for item in items:
+                if "ResourceID" in item and "resource_id" not in item:
+                    item["resource_id"] = item["ResourceID"]
 
             return items
         except (ClientError, BotoCoreError) as exc:

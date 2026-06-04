@@ -103,6 +103,24 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         default=False,
         help="Enable DEBUG-level logging",
     )
+    parser.add_argument(
+        "--dynamodb",
+        action="store_true",
+        default=False,
+        help="Use DynamoDB for state tracking instead of local JSON file (Phase 2+)",
+    )
+    parser.add_argument(
+        "--dynamodb-table",
+        type=str,
+        default="cspm-findings",
+        help="DynamoDB table name for state tracking (default: cspm-findings)",
+    )
+    parser.add_argument(
+        "--dynamodb-region",
+        type=str,
+        default="ap-south-1",
+        help="AWS region where the DynamoDB table is located (default: ap-south-1)",
+    )
     return parser.parse_args(argv)
 
 
@@ -320,9 +338,19 @@ def main(argv: list[str] | None = None) -> int:
     result = _run_scanners(session, regions)
 
     # ── State management / deduplication ────────────────────────────────
+    dynamodb_resource = None
+    if args.dynamodb:
+        print("  📦  DynamoDB state tracking: ENABLED")
+        print(f"      Table: {args.dynamodb_table} ({args.dynamodb_region})")
+        dynamodb_resource = session.resource(
+            "dynamodb", region_name=args.dynamodb_region
+        )
+    else:
+        print(f"  📄  Local state file: {args.state_file}")
+
     state = StateManager(
-        table_name="cspm-findings",
-        dynamodb_resource=None,  # Phase 1: local-only
+        table_name=args.dynamodb_table,
+        dynamodb_resource=dynamodb_resource,
         state_file=args.state_file,
     )
     new_findings, known_findings, resolved = _deduplicate(
