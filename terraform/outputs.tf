@@ -51,3 +51,11 @@ output "scanner_role_arn" {
   description = "ARN of the IAM role assumed by the scanner Lambda"
   value       = aws_iam_role.scanner_lambda.arn
 }
+
+# -----------------------------------------------------------------
+# Lambda Function URL
+# -----------------------------------------------------------------
+output "slack_action_endpoint" {
+  description = "The HTTP endpoint for Slack interactive webhooks"
+  value       = aws_lambda_function_url.remediation.function_url
+}

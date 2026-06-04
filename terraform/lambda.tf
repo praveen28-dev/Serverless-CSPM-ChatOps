@@ -80,3 +80,55 @@ resource "aws_cloudwatch_log_group" "scanner" {
     Name = "${local.name_prefix}-scanner-logs"
   }
 }
+
+# -----------------------------------------------------------------
+# Remediation Lambda Function
+# -----------------------------------------------------------------
+resource "aws_lambda_function" "remediation" {
+  function_name = "${local.name_prefix}-remediation"
+  description   = "CSPM remediation handler for ChatOps interactivity"
+
+  filename         = data.archive_file.scanner.output_path
+  source_code_hash = data.archive_file.scanner.output_base64sha256
+  handler          = "src.remediation.handler.lambda_handler"
+  runtime          = "python3.12"
+
+  role        = aws_iam_role.remediation_lambda.arn
+  timeout     = 30
+  memory_size = 128
+
+  environment {
+    variables = {
+      SLACK_SIGNING_SECRET = var.slack_signing_secret
+    }
+  }
+
+  tags = {
+    Name = "${local.name_prefix}-remediation"
+  }
+
+  depends_on = [
+    aws_iam_role_policy.remediation_cloudwatch,
+    aws_cloudwatch_log_group.remediation,
+  ]
+}
+
+# -----------------------------------------------------------------
+# CloudWatch Log Group for Remediation Lambda
+# -----------------------------------------------------------------
+resource "aws_cloudwatch_log_group" "remediation" {
+  name              = "/aws/lambda/${local.name_prefix}-remediation"
+  retention_in_days = 14
+
+  tags = {
+    Name = "${local.name_prefix}-remediation-logs"
+  }
+}
+
+# -----------------------------------------------------------------
+# Lambda Function URL for Remediation
+# -----------------------------------------------------------------
+resource "aws_lambda_function_url" "remediation" {
+  function_name      = aws_lambda_function.remediation.function_name
+  authorization_type = "NONE"
+}

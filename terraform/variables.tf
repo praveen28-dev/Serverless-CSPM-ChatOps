@@ -53,6 +53,13 @@ variable "slack_webhook_url" {
   sensitive   = true
 }
 
+variable "slack_signing_secret" {
+  description = "Slack signing secret for verifying interactive payloads"
+  type        = string
+  default     = ""
+  sensitive   = true
+}
+
 # -----------------------------------------------------------------
 # DynamoDB
 # -----------------------------------------------------------------

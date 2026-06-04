@@ -243,6 +243,32 @@ class SlackNotifier(BaseNotifier):
                     },
                 }
             )
+
+            # Add "Fix-it" button for supported resource types
+            if finding.resource_type == "EC2::SecurityGroup":
+                action_value = json.dumps({
+                    "action": "remediate",
+                    "type": finding.resource_type,
+                    "id": finding.resource_id,
+                    "region": finding.region
+                })
+                blocks.append({
+                    "type": "actions",
+                    "elements": [
+                        {
+                            "type": "button",
+                            "text": {
+                                "type": "plain_text",
+                                "emoji": True,
+                                "text": "Fix it 🛠️"
+                            },
+                            "style": "danger",
+                            "value": action_value,
+                            "action_id": "remediate_action"
+                        }
+                    ]
+                })
+
             blocks.append({"type": "divider"})
 
         # Overflow notice
