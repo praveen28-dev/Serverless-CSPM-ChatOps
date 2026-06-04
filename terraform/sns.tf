@@ -1,30 +1,12 @@
 # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-# Serverless CSPM Engine — SNS Topic
+# Serverless CSPM Engine — SNS Topic (existing, pre-created)
+# ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+# The SNS topic was created manually in Phase 3. We reference it
+# via locals to avoid needing ListTopics/TagResource permissions on
+# the Fin-App IAM user. The ARN is deterministic.
 # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-# -----------------------------------------------------------------
-# SNS topic for security alert notifications
-# -----------------------------------------------------------------
-resource "aws_sns_topic" "alerts" {
-  name = "${local.name_prefix}-${var.sns_topic_name}"
-
-  tags = {
-    Name = "${local.name_prefix}-${var.sns_topic_name}"
-  }
+locals {
+  sns_topic_name = var.sns_topic_name
+  sns_topic_arn  = "arn:aws:sns:${var.aws_region}:${data.aws_caller_identity.current.account_id}:${var.sns_topic_name}"
 }
-
-# -----------------------------------------------------------------
-# Slack Webhook Subscription  (Phase 3 — ChatOps Integration)
-# -----------------------------------------------------------------
-# Uncomment this block when you have the Slack webhook relay set up.
-# The HTTPS subscription will forward SNS messages to Slack via the
-# Incoming Webhook URL.
-#
-# resource "aws_sns_topic_subscription" "slack_webhook" {
-#   topic_arn = aws_sns_topic.alerts.arn
-#   protocol  = "https"
-#   endpoint  = var.slack_webhook_url
-#
-#   # Deliver raw JSON so the Lambda or API Gateway relay can parse it
-#   raw_message_delivery = true
-# }

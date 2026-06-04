@@ -1,26 +1,12 @@
 # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-# Serverless CSPM Engine — DynamoDB Table
+# Serverless CSPM Engine — DynamoDB Table (existing, pre-created)
+# ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+# The DynamoDB table was created manually in Phase 2. We reference it
+# via locals to avoid needing Describe/Tag permissions on the Fin-App
+# IAM user. The ARN is deterministic from account + region + table name.
 # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-resource "aws_dynamodb_table" "findings" {
-  name         = "${local.name_prefix}-${var.dynamodb_table_name}"
-  billing_mode = "PAY_PER_REQUEST"
-
-  # Partition key — unique identifier for each scanned resource
-  hash_key = "ResourceID"
-
-  attribute {
-    name = "ResourceID"
-    type = "S"
-  }
-
-  # Enable TTL so stale findings expire automatically
-  ttl {
-    attribute_name = "ExpiresAt"
-    enabled        = true
-  }
-
-  tags = {
-    Name = "${local.name_prefix}-${var.dynamodb_table_name}"
-  }
+locals {
+  dynamodb_table_name = var.dynamodb_table_name
+  dynamodb_table_arn  = "arn:aws:dynamodb:${var.aws_region}:${data.aws_caller_identity.current.account_id}:table/${var.dynamodb_table_name}"
 }

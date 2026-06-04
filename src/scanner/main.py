@@ -420,7 +420,7 @@ def lambda_handler(event: dict, context: object) -> dict:
 
     Pulls configuration from environment variables rather than CLI arguments.
     Expected environment variables:
-      - TARGET_REGIONS (e.g. "ap-south-1,us-east-1")
+      - SCAN_REGIONS (e.g. "ap-south-1,us-east-1")
       - DYNAMODB_TABLE
       - DYNAMODB_REGION
       - SLACK_WEBHOOK_URL (optional)
@@ -430,7 +430,7 @@ def lambda_handler(event: dict, context: object) -> dict:
     logger.info("Starting CSPM scan from Lambda")
 
     # Parse config
-    regions_str = os.environ.get("TARGET_REGIONS", "ap-south-1,us-east-1")
+    regions_str = os.environ.get("SCAN_REGIONS", "ap-south-1,us-east-1")
     regions = [r.strip() for r in regions_str.split(",") if r.strip()]
 
     dynamodb_table = os.environ.get("DYNAMODB_TABLE", "cspm-findings")

@@ -95,7 +95,7 @@ resource "aws_iam_role_policy" "scanner_dynamodb" {
           "dynamodb:DeleteItem",
           "dynamodb:Scan"
         ]
-        Resource = aws_dynamodb_table.findings.arn
+        Resource = local.dynamodb_table_arn
       }
     ]
   })
@@ -117,7 +117,7 @@ resource "aws_iam_role_policy" "scanner_sns" {
         Action = [
           "sns:Publish"
         ]
-        Resource = aws_sns_topic.alerts.arn
+        Resource = local.sns_topic_arn
       }
     ]
   })

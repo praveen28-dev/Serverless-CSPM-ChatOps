@@ -20,12 +20,12 @@ output "lambda_function_name" {
 # -----------------------------------------------------------------
 output "dynamodb_table_name" {
   description = "Name of the DynamoDB findings table"
-  value       = aws_dynamodb_table.findings.name
+  value       = local.dynamodb_table_name
 }
 
 output "dynamodb_table_arn" {
   description = "ARN of the DynamoDB findings table"
-  value       = aws_dynamodb_table.findings.arn
+  value       = local.dynamodb_table_arn
 }
 
 # -----------------------------------------------------------------
@@ -33,7 +33,7 @@ output "dynamodb_table_arn" {
 # -----------------------------------------------------------------
 output "sns_topic_arn" {
   description = "ARN of the SNS alerts topic"
-  value       = aws_sns_topic.alerts.arn
+  value       = local.sns_topic_arn
 }
 
 # -----------------------------------------------------------------

@@ -7,7 +7,18 @@
 # -----------------------------------------------------------------
 data "archive_file" "scanner" {
   type        = "zip"
-  source_dir  = "${path.module}/../src/scanner"
+  source_dir  = "${path.module}/.."
+  excludes    = [
+    ".git", 
+    "terraform", 
+    "dist", 
+    "venv", 
+    ".venv",
+    ".gemini",
+    "__pycache__", 
+    ".pytest_cache", 
+    "mock_slack.log"
+  ]
   output_path = "${path.module}/../dist/scanner.zip"
 }
 
@@ -20,7 +31,7 @@ resource "aws_lambda_function" "scanner" {
 
   filename         = data.archive_file.scanner.output_path
   source_code_hash = data.archive_file.scanner.output_base64sha256
-  handler          = "lambda_handler.lambda_handler"
+  handler          = "src.scanner.main.lambda_handler"
   runtime          = "python3.12"
 
   role        = aws_iam_role.scanner_lambda.arn
@@ -29,8 +40,9 @@ resource "aws_lambda_function" "scanner" {
 
   environment {
     variables = {
-      DYNAMODB_TABLE    = aws_dynamodb_table.findings.name
-      SNS_TOPIC_ARN     = aws_sns_topic.alerts.arn
+      DYNAMODB_TABLE    = local.dynamodb_table_name
+      DYNAMODB_REGION   = var.aws_region
+      SNS_TOPIC_ARN     = local.sns_topic_arn
       SCAN_REGIONS      = join(",", var.scan_regions)
       SLACK_WEBHOOK_URL = var.slack_webhook_url
     }

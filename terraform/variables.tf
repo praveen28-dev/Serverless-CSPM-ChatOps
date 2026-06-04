@@ -68,7 +68,7 @@ variable "dynamodb_table_name" {
 variable "sns_topic_name" {
   description = "Name of the SNS topic used for security alerts"
   type        = string
-  default     = "cspm-alerts"
+  default     = "cspm-dev-alerts"
 }
 
 # -----------------------------------------------------------------
