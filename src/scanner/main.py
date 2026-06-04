@@ -21,6 +21,7 @@ from __future__ import annotations
 import argparse
 import json
 import logging
+import os
 import sys
 import time
 from datetime import datetime, timezone
@@ -410,6 +411,79 @@ def main(argv: list[str] | None = None) -> int:
 
     logger.info("Exiting with code 0 — no new critical/high findings")
     return 0
+
+
+# ── AWS Lambda entry point ──────────────────────────────────────────────────
+
+def lambda_handler(event: dict, context: object) -> dict:
+    """AWS Lambda handler for Phase 4.
+
+    Pulls configuration from environment variables rather than CLI arguments.
+    Expected environment variables:
+      - TARGET_REGIONS (e.g. "ap-south-1,us-east-1")
+      - DYNAMODB_TABLE
+      - DYNAMODB_REGION
+      - SLACK_WEBHOOK_URL (optional)
+      - SNS_TOPIC_ARN (optional)
+    """
+    _configure_logging(verbose=os.environ.get("DEBUG", "").lower() == "true")
+    logger.info("Starting CSPM scan from Lambda")
+
+    # Parse config
+    regions_str = os.environ.get("TARGET_REGIONS", "ap-south-1,us-east-1")
+    regions = [r.strip() for r in regions_str.split(",") if r.strip()]
+
+    dynamodb_table = os.environ.get("DYNAMODB_TABLE", "cspm-findings")
+    dynamodb_region = os.environ.get("DYNAMODB_REGION", "ap-south-1")
+    slack_webhook = os.environ.get("SLACK_WEBHOOK_URL")
+    sns_topic_arn = os.environ.get("SNS_TOPIC_ARN")
+
+    start = time.monotonic()
+    session = _create_session(profile=None)  # Lambda uses attached IAM role
+
+    # Execute Scans
+    result = _run_scanners(session, regions)
+
+    # State tracking
+    dynamodb_resource = session.resource("dynamodb", region_name=dynamodb_region)
+    state = StateManager(
+        table_name=dynamodb_table,
+        dynamodb_resource=dynamodb_resource,
+        state_file="/tmp/findings_state.json", # Lambda has write access to /tmp
+    )
+    new_findings, known_findings, resolved = _deduplicate(result.findings, state)
+
+    # Notifications
+    notifiers = []
+    if slack_webhook:
+        notifiers.append(SlackNotifier(webhook_url=slack_webhook))
+    if sns_topic_arn:
+        sns_client = session.client("sns", region_name=dynamodb_region)
+        notifiers.append(SNSNotifier(sns_client=sns_client, topic_arn=sns_topic_arn))
+    
+    for notifier in notifiers:
+        notifier.notify(new_findings)
+
+    elapsed = time.monotonic() - start
+
+    has_critical_or_high = any(
+        f.severity in (Severity.CRITICAL, Severity.HIGH)
+        for f in new_findings
+    )
+
+    return {
+        "statusCode": 200,
+        "body": {
+            "message": "Scan completed",
+            "scan_id": result.scan_id,
+            "resources_scanned": result.total_resources_scanned,
+            "new_findings": len(new_findings),
+            "known_findings": len(known_findings),
+            "resolved": len(resolved),
+            "has_critical_or_high": has_critical_or_high,
+            "duration_seconds": round(elapsed, 2)
+        }
+    }
 
 
 if __name__ == "__main__":
